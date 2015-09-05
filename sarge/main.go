@@ -22,10 +22,10 @@ type Plugin struct {
 	command *exec.Cmd
 }
 
-func NewPlugin(name string, network, address string) *Plugin {
+func NewPlugin(name string, registrar net.Addr) *Plugin {
 	cmd := exec.Command(name,
-		fmt.Sprintf("--network=%s", network),
-		fmt.Sprintf("--path=%s", address))
+		fmt.Sprintf("--network=%s", registrar.Network()),
+		fmt.Sprintf("--path=%s", registrar.String()))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stdout
 	return &Plugin{command: cmd}
@@ -45,25 +45,6 @@ func (p *Plugin) Stop() error {
 	log.Info("Killing the subprocess...")
 	p.command.Process.Kill()
 	return nil
-}
-
-func StartRegistrar() (network, addr string, err error) {
-	log.Info("Starting plugin registrar")
-
-	r := plugin.NewRegistrar()
-	r.OnRegistration = OnRegistration
-	rpc.Register(r)
-	listener, err := net.Listen("unix", url)
-	if err != nil {
-		log.Error("Failed to listen: %s", err.Error())
-		return
-	}
-
-	go rpc.Accept(listener)
-
-	network = listener.Addr().Network()
-	addr = listener.Addr().String()
-	return
 }
 
 func StopRegistrar() {
@@ -109,18 +90,35 @@ func OnRegistration(info *plugin.PluginInfo) {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
+	// make sure our socket is removed when we exit
+	defer os.Remove(url)
+
 	log.Info("Binding signals")
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, os.Kill)
 
-	net, addr, err := StartRegistrar()
+	rpcServer, err := plugin.NewRpcServer("unix", url)
 	if err != nil {
-		return
+		log.Error("Failed to start RCP server")
+		return 1
 	}
-	defer StopRegistrar()
-	log.Info("Registrar started on %s://%s", net, addr)
+	defer rpcServer.Close()
+	log.Info("RPC server started on %s", rpcServer.Addr().String())
 
-	plugin := NewPlugin("edge-detect", net, addr)
+	log.Info("Adding registrar to RPC server")
+	r := plugin.NewRegistrar()
+	r.OnRegistration = OnRegistration
+	err = rpcServer.Register(r)
+	if err != nil {
+		log.Error("Failed: %s", err.Error())
+		return 1
+	}
+
+	plugin := NewPlugin("edge-detect", rpcServer.Addr())
 	ch := plugin.Start()
 
 	for {
@@ -132,10 +130,13 @@ func main() {
 		case err := <-ch:
 			if err != nil {
 				log.Error("Plugin execution failed: %s", err.Error())
+				return 2
 			} else {
 				log.Info("Plugin exited cleanly")
+				return 0
 			}
-			return
 		}
 	}
+
+	return 0
 }

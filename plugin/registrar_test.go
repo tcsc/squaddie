@@ -5,24 +5,36 @@ import (
 	"testing"
 )
 
+// ----------------------------------------------------------------------------
+//
+// ----------------------------------------------------------------------------
+
 func Test_RegisterPlugin(t *testing.T) {
 	registrar := NewRegistrar()
+
 	info := PluginInfo{
-		Name: "Dummy Plugin",
-		Url:  "unix:///var/run/squaddie/dummy.sock",
+		Name:    "Dummy Plugin",
+		Network: "unix",
+		Path:    "/var/run/squaddie/dummy.sock",
 	}
-	err := registrar.RegisterPlugin(info)
+	var cookie string
+	err := registrar.RegisterPlugin(info, &cookie)
 	assert.NoError(t, err)
 }
 
 func Test_ReregisteringPluginFails(t *testing.T) {
 	registrar := NewRegistrar()
+
 	info := PluginInfo{
-		Name: "Dummy Plugin",
-		Url:  "unix:///var/run/squaddie/dummy.sock",
+		Name:    "Dummy Plugin",
+		Network: "unix",
+		Path:    "/var/run/squaddie/dummy.sock",
 	}
-	err := registrar.RegisterPlugin(info)
+	var cookie string
+	err := registrar.RegisterPlugin(info, &cookie)
 	assert.NoError(t, err)
-	err = registrar.RegisterPlugin(info)
+	assert.NotEmpty(t, cookie)
+
+	err = registrar.RegisterPlugin(info, &cookie)
 	assert.Error(t, err)
 }

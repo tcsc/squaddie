@@ -5,7 +5,6 @@ import (
 	pflag "github.com/ogier/pflag"
 	logging "github.com/op/go-logging"
 	"github.com/tcsc/squaddie/plugin"
-	"net/rpc"
 	"os"
 	"os/signal"
 	"sync/atomic"
@@ -33,54 +32,53 @@ func (self *EdgeDetect) Invoke(args plugin.InvokeArgs, reply *plugin.InvokeReply
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	log.Info("Starting edge detect service")
 	args, err := plugin.ParseCommandLine(os.Args[1:])
 	if err != nil {
 		if err != pflag.ErrHelp {
 			log.Error("Error: %s", err.Error())
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	log.Info("Trapping signals...")
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt)
 
-	log.Info("Connecting to %s://%s", args.Network, args.Path)
-	client, err := rpc.Dial(args.Network, args.Path)
+	sarge, err := plugin.NewClient(args.Network, args.Path)
 	if err != nil {
 		log.Error("Failed to connect to RPC server: %s", err.Error())
-		os.Exit(1)
+		return 1
 	}
 	log.Info("Connected!")
+	defer sarge.Close()
 
 	ed := EdgeDetect{}
-	err = plugin.StartRpc(&ed, "unix", "/tmp/edge-detect.sock")
+	svr, err := plugin.StartRpc(&ed, "unix", "/tmp/edge-detect.sock")
 	if err != nil {
 		log.Error("Failed to start RPC services: %s", err.Error())
-		os.Exit(1)
+		return 1
 	}
 	defer os.RemoveAll("/tmp/edge-detect.sock")
 
-	var cookie string
-	pi := plugin.PluginInfo{
-		Name:    "Edge Detect",
-		Network: "unix",
-		Path:    "/tmp/edge-detect.sock",
-	}
-
 	log.Info("Registering Edge detection plugin")
-	err = client.Call("Registrar.RegisterPlugin", pi, &cookie)
+	cookie, err := sarge.Register("Edge detection", "EdgeDetect.Invoke", svr.Addr())
 	if err != nil {
 		log.Info("Plugin registration failed: %s", err.Error())
-		os.Exit(2)
+		return 2
 	}
 	log.Info("Registered with cookie \"%s\"", cookie)
 
+	log.Info("Waiting for kill signal")
 	select {
 	case sig := <-ch:
 		fmt.Printf("Caught %d\n", sig)
 	}
 
 	print("Exiting\n")
+	return 0
 }
