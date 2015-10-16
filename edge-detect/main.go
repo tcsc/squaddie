@@ -7,35 +7,22 @@ import (
 	"github.com/tcsc/squaddie/plugin"
 	"os"
 	"os/signal"
-	"sync/atomic"
-	"time"
 )
 
 var log = logging.MustGetLogger("main")
 
-type EdgeDetect struct {
-}
+var format = logging.MustStringFormatter(
+	"%{color}%{time:2006-01-02 15:04:05}%{color:reset} edge-detect> %{message}")
 
-var callcount int32 = 0
-
-func (self *EdgeDetect) Invoke(args plugin.InvokeArgs, reply *plugin.InvokeReply) error {
-	count := atomic.AddInt32(&callcount, 1)
-	log.Info("%d: Entering Invoke", count)
-
-	select {
-	case <-time.After(10 * time.Second):
-		log.Info("%d: Wait has elapsed", count)
-	}
-	reply = &plugin.InvokeReply{}
-	log.Info("%d: Leaving Invoke", count)
-	return nil
-}
-
-func main() {
-	os.Exit(run())
+func initLogging() {
+	backend := logging.NewLogBackend(os.Stdout, "", 0)
+	formatted := logging.NewBackendFormatter(backend, format)
+	logging.SetBackend(formatted)
 }
 
 func run() int {
+	initLogging()
+
 	log.Info("Starting edge detect service")
 	args, err := plugin.ParseCommandLine(os.Args[1:])
 	if err != nil {
@@ -49,7 +36,7 @@ func run() int {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt)
 
-	sarge, err := plugin.NewClient(args.Network, args.Path)
+	sarge, err := plugin.NewRegistrarClient(args.Network, args.Path)
 	if err != nil {
 		log.Error("Failed to connect to RPC server: %s", err.Error())
 		return 1
@@ -81,4 +68,8 @@ func run() int {
 
 	print("Exiting\n")
 	return 0
+}
+
+func main() {
+	os.Exit(run())
 }

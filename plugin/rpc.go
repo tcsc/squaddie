@@ -8,6 +8,10 @@ import (
 
 var rpcLog = logging.MustGetLogger("rpc")
 
+// ----------------------------------------------------------------------------
+//
+// ----------------------------------------------------------------------------
+
 // RpcServer is an alternative to the default RPC server that can be
 // gracefully shut down.
 type RpcServer struct {
@@ -93,16 +97,6 @@ func (r *RpcServer) serve() {
 	}
 }
 
-type InvokeArgs struct {
-}
-
-type InvokeReply struct {
-}
-
-type Plugin interface {
-	Invoke(args InvokeArgs, reply *InvokeReply) error
-}
-
 func StartRpc(p Plugin, network, path string) (*RpcServer, error) {
 	svr, err := NewRpcServer(network, path)
 	if err != nil {
@@ -115,4 +109,41 @@ func StartRpc(p Plugin, network, path string) (*RpcServer, error) {
 	}
 
 	return svr, nil
+}
+
+// ----------------------------------------------------------------------------
+//
+// ----------------------------------------------------------------------------
+
+// An RPC client for the registrar service
+type RegistrarClient struct {
+	rpcClient *rpc.Client
+}
+
+func NewRegistrarClient(network, path string) (*RegistrarClient, error) {
+	conn, err := net.Dial(network, path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &RegistrarClient{
+		rpcClient: rpc.NewClient(conn),
+	}, nil
+}
+
+func (c *RegistrarClient) Close() error {
+	return c.rpcClient.Close()
+}
+
+func (c *RegistrarClient) Register(name, service string, endpoint net.Addr) (string, error) {
+	args := PluginInfo{
+		Name:    name,
+		Network: endpoint.Network(),
+		Path:    endpoint.String(),
+
+		Service: service,
+	}
+	cookie := ""
+	err := c.rpcClient.Call("Registrar.RegisterPlugin", args, &cookie)
+	return cookie, err
 }

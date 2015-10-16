@@ -1,15 +1,12 @@
 package main
 
 import (
-	"fmt"
+	pflag "github.com/ogier/pflag"
 	logging "github.com/op/go-logging"
 	"github.com/tcsc/squaddie/plugin"
-	"net"
 	"net/rpc"
 	"os"
-	"os/exec"
 	"os/signal"
-	"time"
 )
 
 const (
@@ -18,33 +15,17 @@ const (
 
 var log = logging.MustGetLogger("main")
 
-type Plugin struct {
-	command *exec.Cmd
+type Args struct {
+	ImageFile string
 }
 
-func NewPlugin(name string, registrar net.Addr) *Plugin {
-	cmd := exec.Command(name,
-		fmt.Sprintf("--network=%s", registrar.Network()),
-		fmt.Sprintf("--path=%s", registrar.String()))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stdout
-	return &Plugin{command: cmd}
-}
-
-func (p *Plugin) Start() <-chan error {
-	ch := make(chan error)
-	go func() {
-		log.Info("Running subprocess")
-		ch <- p.command.Run()
-		log.Info("Subprocess has returned")
-	}()
-	return ch
-}
-
-func (p *Plugin) Stop() error {
-	log.Info("Killing the subprocess...")
-	p.command.Process.Kill()
-	return nil
+func parseCommandLine(cmdLine []string) (Args, error) {
+	var result Args
+	flags := pflag.NewFlagSet("Sarge", pflag.ContinueOnError)
+	flags.StringVarP(&result.ImageFile, "image", "i", "",
+		"The image file to load")
+	err := flags.Parse(cmdLine)
+	return result, err
 }
 
 func StopRegistrar() {
@@ -58,46 +39,26 @@ func StopRegistrar() {
 func OnRegistration(info *plugin.PluginInfo) {
 	log.Info("Connecting to %s service at %s://%s", info.Name,
 		info.Network, info.Path)
-	client, err := rpc.Dial(info.Network, info.Path)
+	_, err := rpc.Dial(info.Network, info.Path)
 	if err != nil {
 		log.Error("Failed to connect to RPC server: %s", err.Error())
 		os.Exit(1)
 	}
-
-	asyncArgs := plugin.InvokeArgs{}
-	var asyncReply plugin.InvokeReply
-	log.Info("Invoking async call...")
-	call := client.Go("EdgeDetect.Invoke", asyncArgs, &asyncReply, nil)
-
-	<-time.After(5 * time.Second)
-
-	args := plugin.InvokeArgs{}
-	var reply plugin.InvokeReply
-	log.Info("Invoking sync call...")
-	err = client.Call("EdgeDetect.Invoke", args, &reply)
-	if err != nil {
-		log.Error("Failed to call RPC method: %s", err.Error())
-		os.Exit(1)
-	}
-
-	log.Info("Waiting got async call to finish")
-	<-call.Done
-	if call.Error != nil {
-		log.Error("Failed to call RPC method: %s", call.Error.Error())
-		os.Exit(1)
-	}
-	log.Info("All done")
-}
-
-func main() {
-	os.Exit(run())
 }
 
 func run() int {
 	// make sure our socket is removed when we exit
 	defer os.Remove(url)
 
-	log.Info("Binding signals")
+	args, err := parseCommandLine(os.Args[1:])
+	if err != nil {
+		if err != pflag.ErrHelp {
+			log.Error("Error: %s", err.Error())
+		}
+		return 1
+	}
+
+	log.Info("Trapping signals")
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, os.Kill)
 
@@ -121,6 +82,15 @@ func run() int {
 	plugin := NewPlugin("edge-detect", rpcServer.Addr())
 	ch := plugin.Start()
 
+	log.Info("Loading image %s", args.ImageFile)
+	img, err := loadImage(args.ImageFile)
+	if err != nil {
+		log.Error("Failed loading image: %s", err.Error())
+		return 3
+	}
+
+	log.Info("Image is a %T", img)
+
 	for {
 		select {
 		case sig := <-signals:
@@ -139,4 +109,8 @@ func run() int {
 	}
 
 	return 0
+}
+
+func main() {
+	os.Exit(run())
 }
