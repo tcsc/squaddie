@@ -4,7 +4,6 @@ import (
 	pflag "github.com/ogier/pflag"
 	logging "github.com/op/go-logging"
 	"github.com/tcsc/squaddie/plugin"
-	"net/rpc"
 	"os"
 	"os/signal"
 )
@@ -36,16 +35,6 @@ func StopRegistrar() {
 	}
 }
 
-func OnRegistration(info *plugin.PluginInfo) {
-	log.Info("Connecting to %s service at %s://%s", info.Name,
-		info.Network, info.Path)
-	_, err := rpc.Dial(info.Network, info.Path)
-	if err != nil {
-		log.Error("Failed to connect to RPC server: %s", err.Error())
-		os.Exit(1)
-	}
-}
-
 func run() int {
 	// make sure our socket is removed when we exit
 	defer os.Remove(url)
@@ -70,32 +59,50 @@ func run() int {
 	defer rpcServer.Close()
 	log.Info("RPC server started on %s", rpcServer.Addr().String())
 
+	// receive notifications abut plugin registrations on this channel
+	regCh := make(chan plugin.Info, 1)
+
+	log.Info("Creating registrar")
+	registrar := plugin.NewRegistrar(func(info plugin.Info) {
+		regCh <- info
+	})
+
 	log.Info("Adding registrar to RPC server")
-	r := plugin.NewRegistrar()
-	r.OnRegistration = OnRegistration
-	err = rpcServer.Register(r)
+	err = rpcServer.Register(registrar)
 	if err != nil {
 		log.Error("Failed: %s", err.Error())
 		return 1
 	}
 
-	plugin := NewPlugin("edge-detect", rpcServer.Addr())
-	ch := plugin.Start()
+	log.Info("Launching plugin server")
+	pluginServer := NewPlugin("edge-detect", rpcServer.Addr())
+	ch := pluginServer.Start()
 
 	log.Info("Loading image %s", args.ImageFile)
-	img, err := loadImage(args.ImageFile)
+	img, err := loadImage(args.ImageFile, "squaddie-img-buffer")
 	if err != nil {
 		log.Error("Failed loading image: %s", err.Error())
 		return 3
 	}
+	defer img.Close()
 
-	log.Info("Image is a %T", img)
+	log.Info("Waiting for plugin to register...")
+	info := <-regCh
+
+	log.Info("Connecting back to plugin service")
+	client, err := plugin.NewClient(info)
+	if err != nil {
+		log.Error("Failed: %s", err.Error())
+		return 4
+	}
+
+	client.Invoke(img)
 
 	for {
 		select {
 		case sig := <-signals:
 			log.Info("Detected signal %d", sig)
-			plugin.Stop()
+			pluginServer.Stop()
 
 		case err := <-ch:
 			if err != nil {

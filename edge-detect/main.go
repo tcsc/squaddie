@@ -52,8 +52,8 @@ func run() int {
 	}
 	defer os.RemoveAll("/tmp/edge-detect.sock")
 
-	log.Info("Registering Edge detection plugin")
-	cookie, err := sarge.Register("Edge detection", "EdgeDetect.Invoke", svr.Addr())
+	log.Info("Registering edge-detection plugin")
+	cookie, err := sarge.Register("Edge Detect", "EdgeDetect.Invoke", svr.Addr())
 	if err != nil {
 		log.Info("Plugin registration failed: %s", err.Error())
 		return 2

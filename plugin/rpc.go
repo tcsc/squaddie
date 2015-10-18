@@ -136,7 +136,7 @@ func (c *RegistrarClient) Close() error {
 }
 
 func (c *RegistrarClient) Register(name, service string, endpoint net.Addr) (string, error) {
-	args := PluginInfo{
+	args := Info{
 		Name:    name,
 		Network: endpoint.Network(),
 		Path:    endpoint.String(),
@@ -146,4 +146,44 @@ func (c *RegistrarClient) Register(name, service string, endpoint net.Addr) (str
 	cookie := ""
 	err := c.rpcClient.Call("Registrar.RegisterPlugin", args, &cookie)
 	return cookie, err
+}
+
+// ----------------------------------------------------------------------------
+//
+// ----------------------------------------------------------------------------
+
+type Client struct {
+	info      Info
+	rpcClient *rpc.Client
+}
+
+func NewClient(info Info) (*Client, error) {
+	rpcLog.Info("Connecting to %s service at %s://%s", info.Name,
+		info.Network, info.Path)
+	conn, err := net.Dial(info.Network, info.Path)
+	if err != nil {
+		rpcLog.Error("Failed to connect to RPC server: %s", err.Error())
+		return nil, err
+	}
+
+	return &Client{
+		info:      info,
+		rpcClient: rpc.NewClient(conn),
+	}, nil
+}
+
+func (plugin *Client) Invoke(img *MMapImage) error {
+	rpcLog.Info("Invoking plugin \"%s\"", plugin.info.Name)
+	args := InvokeArgs{
+		Region: img.Name(),
+		Bounds: img.Bounds(),
+	}
+
+	reply := InvokeReply{}
+	err := plugin.rpcClient.Call(plugin.info.Service, args, &reply)
+	if err != nil {
+		rpcLog.Error("plugin invocation failed: %s", err.Error())
+	}
+
+	return err
 }

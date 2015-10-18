@@ -51,6 +51,10 @@ func OpenMMapImage(name string, rect image.Rectangle) (img *MMapImage, err error
 	return
 }
 
+func (img *MMapImage) Name() string {
+	return img.region.name
+}
+
 func (img *MMapImage) Close() {
 	img.region.Close()
 }

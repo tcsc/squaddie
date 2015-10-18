@@ -1,8 +1,12 @@
 package plugin
 
-import ()
+import (
+	"image"
+)
 
 type InvokeArgs struct {
+	Bounds image.Rectangle
+	Region string
 }
 
 type InvokeReply struct {
