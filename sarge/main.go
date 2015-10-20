@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	url = "/tmp/sarge.sock"
+	url = "/tmp/squaddie-sarge.sock"
 )
 
 var log = logging.MustGetLogger("main")
@@ -53,7 +53,7 @@ func run() int {
 
 	rpcServer, err := plugin.NewRpcServer("unix", url)
 	if err != nil {
-		log.Error("Failed to start RCP server")
+		log.Error("Failed to start RPC server: %s", err.Error())
 		return 1
 	}
 	defer rpcServer.Close()
@@ -75,16 +75,8 @@ func run() int {
 	}
 
 	log.Info("Launching plugin server")
-	pluginServer := NewPlugin("edge-detect", rpcServer.Addr())
+	pluginServer := NewPlugin("convolutions", rpcServer.Addr())
 	ch := pluginServer.Start()
-
-	log.Info("Loading image %s", args.ImageFile)
-	img, err := loadImage(args.ImageFile, "squaddie-img-buffer")
-	if err != nil {
-		log.Error("Failed loading image: %s", err.Error())
-		return 3
-	}
-	defer img.Close()
 
 	log.Info("Waiting for plugin to register...")
 	info := <-regCh
@@ -96,7 +88,35 @@ func run() int {
 		return 4
 	}
 
-	client.Invoke(img)
+	log.Info("Loading image %s", args.ImageFile)
+	img, err := loadImage(args.ImageFile, "squaddie-img-buffer")
+	if err != nil {
+		log.Error("Failed loading image: %s", err.Error())
+		return 3
+	}
+	defer img.Close()
+
+	log.Info("Image is %d x %d pixels", img.Bounds().Dx(), img.Bounds().Dy())
+
+	log.Info("saving pre-process image...")
+	err = saveImage(img, "pre-out.jpg")
+	if err != nil {
+		log.Error("Image save failed: %s", err)
+	}
+
+	log.Info("Invoking plugin")
+	err = client.Invoke(img)
+	if err != nil {
+		log.Error("Plugin invocation failed: %s", err)
+	}
+
+	log.Info("saving post-process image...")
+	err = saveImage(img, "post-out.jpg")
+	if err != nil {
+		log.Error("Image save failed: %s", err)
+	}
+
+	log.Info("Done. Waiting for kill signal")
 
 	for {
 		select {

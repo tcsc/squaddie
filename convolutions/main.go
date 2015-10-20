@@ -9,10 +9,12 @@ import (
 	"os/signal"
 )
 
+const url = "/tmp/squaddie-convolutions.sock"
+
 var log = logging.MustGetLogger("main")
 
 var format = logging.MustStringFormatter(
-	"%{color}%{time:2006-01-02 15:04:05}%{color:reset} edge-detect> %{message}")
+	"%{color}%{time:2006-01-02 15:04:05}%{color:reset} conv> %{message}")
 
 func initLogging() {
 	backend := logging.NewLogBackend(os.Stdout, "", 0)
@@ -23,7 +25,7 @@ func initLogging() {
 func run() int {
 	initLogging()
 
-	log.Info("Starting edge detect service")
+	log.Info("Starting image convolution service")
 	args, err := plugin.ParseCommandLine(os.Args[1:])
 	if err != nil {
 		if err != pflag.ErrHelp {
@@ -45,14 +47,14 @@ func run() int {
 	defer sarge.Close()
 
 	ed := EdgeDetect{}
-	svr, err := plugin.StartRpc(&ed, "unix", "/tmp/edge-detect.sock")
+	svr, err := plugin.StartRpc(&ed, "unix", url)
 	if err != nil {
 		log.Error("Failed to start RPC services: %s", err.Error())
 		return 1
 	}
-	defer os.RemoveAll("/tmp/edge-detect.sock")
+	defer os.RemoveAll(url)
 
-	log.Info("Registering edge-detection plugin")
+	log.Info("Registering convolution plugins")
 	cookie, err := sarge.Register("Edge Detect", "EdgeDetect.Invoke", svr.Addr())
 	if err != nil {
 		log.Info("Plugin registration failed: %s", err.Error())
